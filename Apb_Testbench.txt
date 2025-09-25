@@ -1,0 +1,43 @@
+module apb_tb;
+    logic        pclk = 0, preset_n = 0;
+    logic [31:0] paddr, pwdata, prdata, rdata;
+    logic        pwrite, psel, penable, pready, pslverr;
+    logic        req, wr, done, error;
+
+    // Randomization variables
+    rand logic [31:0] addr;
+    rand logic [31:0] wdata;
+    rand logic        wr_rd;
+    constraint c_addr { addr inside {[0:255*4]}; addr[1:0] == 2'b00; }
+
+    apb_master u_master (
+        .pclk(pclk), .preset_n(preset_n),
+        .paddr(paddr), .pwrite(pwrite), .psel(psel), .penable(penable),
+        .pwdata(pwdata), .prdata(prdata), .pready(pready), .pslverr(pslverr),
+        .req(req), .addr(addr), .wr(wr_rd), .wdata(wdata),
+        .rdata(rdata), .done(done), .error(error)
+    );
+
+    apb_slave u_slave (
+        .pclk(pclk), .preset_n(preset_n),
+        .paddr(paddr), .pwrite(pwrite), .psel(psel), .penable(penable),
+        .pwdata(pwdata), .prdata(prdata), .pready(pready), .pslverr(pslverr)
+    );
+
+    // Clock generation
+    always #5 pclk = ~pclk;
+
+    initial begin
+        preset_n = 0; #20; preset_n = 1;
+        repeat (20) begin
+            assert(randomize());
+            req = 1;
+            @(posedge pclk);
+            req = 0;
+            wait (done);
+            $display("ADDR=%h WR=%b WD=%h RD=%h ERROR=%b", addr, wr_rd, wdata, rdata, error);
+            @(posedge pclk);
+        end
+        $finish;
+    end
+endmodule
