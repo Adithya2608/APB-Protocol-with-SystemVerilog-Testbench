@@ -1,43 +1,72 @@
+module apb_tb;class apb_txn;
+    rand logic [31:0] addr;
+    rand logic [31:0] data;
+    rand logic wr;
+    constraint c_addr { addr inside {[0:255*4]}; addr[1:0]==0; }
+    function void display();
+        $display("APB TXN: %s Addr=0x%08x Data=0x%08x", wr ? "WRITE" : "READ", addr, data);
+    endfunction
+endclass
+
 module apb_tb;
     logic        pclk = 0, preset_n = 0;
     logic [31:0] paddr, pwdata, prdata, rdata;
     logic        pwrite, psel, penable, pready, pslverr;
-    logic        req, wr, done, error;
+    logic        req, done, error;
+    logic [31:0] test_addr, test_data;
+    logic        test_wr;
 
-    // Randomization variables
-    rand logic [31:0] addr;
-    rand logic [31:0] wdata;
-    rand logic        wr_rd;
-    constraint c_addr { addr inside {[0:255*4]}; addr[1:0] == 2'b00; }
+    // Scoreboard reference model
+    bit [31:0] ref_mem [0:255];
 
-    apb_master u_master (
+    // Instantiations
+    apb_master u_master(
         .pclk(pclk), .preset_n(preset_n),
         .paddr(paddr), .pwrite(pwrite), .psel(psel), .penable(penable),
         .pwdata(pwdata), .prdata(prdata), .pready(pready), .pslverr(pslverr),
-        .req(req), .addr(addr), .wr(wr_rd), .wdata(wdata),
+        .req(req), .addr(test_addr), .wr(test_wr), .wdata(test_data),
         .rdata(rdata), .done(done), .error(error)
     );
-
-    apb_slave u_slave (
+    apb_slave u_slave(
         .pclk(pclk), .preset_n(preset_n),
         .paddr(paddr), .pwrite(pwrite), .psel(psel), .penable(penable),
         .pwdata(pwdata), .prdata(prdata), .pready(pready), .pslverr(pslverr)
     );
 
-    // Clock generation
+    // Clock
     always #5 pclk = ~pclk;
 
     initial begin
         preset_n = 0; #20; preset_n = 1;
-        repeat (20) begin
-            assert(randomize());
+        repeat (100) begin
+            apb_txn t = new();
+            assert(t.randomize());
+            t.display();
+
+            test_addr = t.addr;
+            test_wr   = t.wr;
+            test_data = t.data;
+
             req = 1;
             @(posedge pclk);
             req = 0;
-            wait (done);
-            $display("ADDR=%h WR=%b WD=%h RD=%h ERROR=%b", addr, wr_rd, wdata, rdata, error);
+            wait(done);
+
+            // Scoreboard update/check
+            if (t.wr && !error)
+                ref_mem[t.addr[9:2]] = t.data;
+            if (!t.wr && !error) begin
+                if (ref_mem.exists(t.addr[9:2])) begin
+                    if (rdata !== ref_mem[t.addr[9:2]])
+                        $error("Scoreboard mismatch: Addr=0x%08x Got=0x%08x Exp=0x%08x", t.addr, rdata, ref_mem[t.addr[9:2]]);
+                end else if (rdata !== 0)
+                    $error("Scoreboard mismatch for uninitialized read at Addr=0x%08x: Got=0x%08x Exp=0x00000000", t.addr, rdata);
+            end
             @(posedge pclk);
         end
+        $display("Testbench finished!");
         $finish;
     end
 endmodule
+
+
